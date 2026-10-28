@@ -16,8 +16,11 @@ export function createWhatsAppSender(waConfig, { dataDir, logger = console } = {
     case 'cloudapi':
       requireConfig(waConfig, ['cloudApiToken', 'cloudApiPhoneNumberId', 'targets'], 'cloudapi');
       return cloudApiProvider(waConfig);
+    case 'twilio':
+      requireConfig(waConfig, ['twilioAccountSid', 'twilioAuthToken', 'twilioFrom', 'targets'], 'twilio');
+      return twilioProvider(waConfig);
     default:
-      throw new Error(`WA_PROVIDER tidak dikenal: "${waConfig.provider}" (pilih: console, fonnte, cloudapi)`);
+      throw new Error(`WA_PROVIDER tidak dikenal: "${waConfig.provider}" (pilih: console, fonnte, cloudapi, twilio)`);
   }
 }
 
@@ -111,6 +114,51 @@ function cloudApiProvider({ cloudApiToken, cloudApiPhoneNumberId, cloudApiVersio
         if (!mediaId || !captionFits) {
           for (const chunk of chunkText(text, 4096)) {
             await sendMessage(to, { type: 'text', text: { body: chunk, preview_url: false } });
+          }
+        }
+      }
+    },
+  };
+}
+
+/** Twilio WhatsApp API — mendukung Content Template (ContentSid) atau pesan teks bebas (Body). Gambar diabaikan. */
+function twilioProvider({ twilioAccountSid, twilioAuthToken, twilioFrom, twilioContentSid, targets }) {
+  const url = `https://api.twilio.com/2010-04-01/Accounts/${twilioAccountSid}/Messages.json`;
+  const auth = 'Basic ' + Buffer.from(`${twilioAccountSid}:${twilioAuthToken}`).toString('base64');
+
+  async function post(params) {
+    const form = new URLSearchParams();
+    form.append('From', `whatsapp:${twilioFrom}`);
+    for (const [k, v] of Object.entries(params)) form.append(k, v);
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: auth, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: form,
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(`Twilio gagal (HTTP ${res.status}): ${body.message || JSON.stringify(body)}`);
+    }
+  }
+
+  return {
+    name: 'twilio',
+    async send({ text }) {
+      for (const to of targets) {
+        if (twilioContentSid) {
+          await post({
+            To: `whatsapp:+${to}`,
+            ContentSid: twilioContentSid,
+            ContentVariables: JSON.stringify({ '1': text }),
+          });
+        } else {
+          // Bila tanpa template (user interaction / dalam jendela 24 jam), kirim sebagai freeform text (Body)
+          for (const chunk of chunkText(text, 1600)) {
+            await post({
+              To: `whatsapp:+${to}`,
+              Body: chunk,
+            });
           }
         }
       }

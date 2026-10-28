@@ -39,5 +39,9 @@ export const config = {
     cloudApiToken: env.WA_CLOUD_TOKEN || '',
     cloudApiPhoneNumberId: env.WA_CLOUD_PHONE_NUMBER_ID || '',
     cloudApiVersion: env.WA_CLOUD_API_VERSION || 'v21.0',
+    twilioAccountSid: env.TWILIO_ACCOUNT_SID || '',
+    twilioAuthToken: env.TWILIO_AUTH_TOKEN || '',
+    twilioFrom: env.TWILIO_WHATSAPP_FROM || '',
+    twilioContentSid: env.TWILIO_CONTENT_SID || '',
   },
 };

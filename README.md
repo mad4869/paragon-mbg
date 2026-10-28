@@ -62,6 +62,7 @@ Atur `WA_PROVIDER` di `.env`:
 | `console`  | Default untuk uji coba. Tidak mengirim apa pun; rekap disimpan ke `data/outbox/`. |
 | `fonnte`   | Via [Fonnte](https://fonnte.com), gateway yang umum dipakai di Indonesia. Isi `FONNTE_TOKEN`. Pengiriman file/gambar memerlukan paket Fonnte yang mendukung upload file. `WA_TARGETS` boleh berisi ID grup. |
 | `cloudapi` | WhatsApp Business Cloud API resmi dari Meta. Isi `WA_CLOUD_TOKEN` dan `WA_CLOUD_PHONE_NUMBER_ID`. **Catatan:** Meta hanya mengizinkan pesan bebas (non-template) dalam 24 jam setelah penerima terakhir mengirim pesan ke nomor bisnis. Di luar jendela itu, perlu template yang disetujui. |
+| `twilio`   | Via [Twilio](https://www.twilio.com/docs/whatsapp), BSP resmi WhatsApp. Isi `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, dan `TWILIO_WHATSAPP_FROM`. Hanya mengirim teks (gambar rekap diabaikan). Untuk sandbox, penerima harus mengirim kode join terlebih dahulu. |
 
 `WA_TARGETS` berisi nomor tujuan dalam format internasional tanpa `+`, misalnya `6281234567890`.
 Beberapa nomor dipisahkan dengan koma.
