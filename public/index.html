@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pesan Makan Siang</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main>
+    <header>
+      <h1 id="title">Pesan Makan Siang</h1>
+      <p id="date">&nbsp;</p>
+    </header>
+
+    <div id="status" class="status" role="status">
+      <span class="dot"></span>
+      <span id="status-text">Memuat…</span>
+      <span id="countdown" class="countdown"></span>
+    </div>
+
+    <section class="card">
+      <h2>Form pemesanan</h2>
+      <form id="order-form" novalidate>
+        <div class="field">
+          <label for="name">Nama</label>
+          <input id="name" name="name" autocomplete="name" required>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label for="food">Makanan</label>
+            <input id="food" name="food" placeholder="Contoh: Nasi goreng ayam" required>
+          </div>
+          <div class="field">
+            <label for="quantity">Jumlah</label>
+            <input id="quantity" name="quantity" type="number" min="1" value="1" inputmode="numeric" required>
+          </div>
+        </div>
+        <div class="field">
+          <label for="notes">Catatan <span class="hint">(opsional)</span></label>
+          <textarea id="notes" name="notes" placeholder="Contoh: tidak pedas, tanpa bawang"></textarea>
+        </div>
+        <button id="submit" type="submit" class="block">Kirim pesanan</button>
+        <p id="form-message" class="message" aria-live="polite"></p>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2 id="orders-title">Pesanan</h2>
+      <div id="summary" class="summary"></div>
+      <ul id="orders" class="orders"></ul>
+      <p id="orders-empty" class="empty" hidden>Belum ada pesanan.</p>
+    </section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

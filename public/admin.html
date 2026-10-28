@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Admin · Pesan Makan Siang</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Admin rekap</h1>
+      <p>Lihat pesanan, pratinjau rekap, dan kirim ulang ke WhatsApp.</p>
+    </header>
+
+    <section id="login" class="card" hidden>
+      <h2>Masuk</h2>
+      <form id="login-form">
+        <div class="field">
+          <label for="token">Token admin</label>
+          <input id="token" type="password" autocomplete="current-password" required>
+        </div>
+        <button type="submit">Masuk</button>
+        <p id="login-message" class="message err"></p>
+      </form>
+    </section>
+
+    <div id="panel" hidden>
+      <section class="card">
+        <div class="toolbar">
+          <label for="date" style="margin:0">Batch</label>
+          <input id="date" type="date" style="width:auto">
+          <button id="refresh" type="button" class="secondary">Muat ulang</button>
+          <button id="logout" type="button" class="secondary">Keluar</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Pengaturan</h2>
+        <form id="settings-form">
+          <label for="cutoff">Jam tutup harian <span class="hint">(WIB)</span></label>
+          <div class="toolbar">
+            <input id="cutoff" type="time" step="60" required style="width:auto">
+            <button type="submit">Simpan</button>
+          </div>
+          <p class="help">Pesanan sebelum jam ini masuk batch hari ini, sesudahnya masuk batch besok. Rekap dikirim otomatis pada jam ini.</p>
+          <p id="settings-message" class="message" aria-live="polite"></p>
+        </form>
+      </section>
+
+      <section class="card meta">
+        <h2>Status batch</h2>
+        <dl id="meta"></dl>
+        <div class="toolbar" style="margin-top:16px">
+          <button id="send" type="button">Kirim rekap sekarang</button>
+          <button id="reopen" type="button" class="secondary" hidden>Reset batch</button>
+        </div>
+        <p id="send-message" class="message" aria-live="polite"></p>
+      </section>
+
+      <section class="card">
+        <h2>Pesanan</h2>
+        <ul id="orders" class="orders"></ul>
+        <p id="orders-empty" class="empty" hidden>Tidak ada pesanan pada batch ini.</p>
+      </section>
+
+      <section class="card">
+        <h2>Pratinjau rekap (teks)</h2>
+        <pre id="recap-text" class="recap"></pre>
+      </section>
+
+      <section class="card">
+        <h2>Pratinjau rekap (gambar)</h2>
+        <img id="recap-img" class="recap-img" alt="Pratinjau gambar rekap">
+      </section>
+    </div>
+  </main>
+  <script src="/admin.js"></script>
+</body>
+</html>
