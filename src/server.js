@@ -17,7 +17,19 @@ export const db = openDatabase({
 });
 export const batches = new BatchService(db);
 const cutoffLabel = async () => formatCutoff(await batches.getCutoff());
-export const sender = createWhatsAppSender(config.whatsapp, { dataDir: config.dataDir });
+export const sender = (() => {
+  try {
+    return createWhatsAppSender(config.whatsapp, { dataDir: config.dataDir });
+  } catch (err) {
+    console.warn('[whatsapp] Peringatan sender:', err.message);
+    return {
+      name: config.whatsapp.provider || 'disabled',
+      async send() {
+        throw new Error(`WhatsApp sender belum siap: ${err.message}`);
+      },
+    };
+  }
+})();
 export const scheduler = new RecapScheduler({
   batches,
   sender,
@@ -119,7 +131,8 @@ app.get('/api/admin/batch', requireAdmin, batchDateParam, async (req, res, next)
 app.get('/api/admin/recap.png', requireAdmin, batchDateParam, async (req, res, next) => {
   try {
     const recap = await scheduler.buildRecap(req.batchDate);
-    res.type('png').set('Cache-Control', 'no-store').send(renderRecapPng(recap));
+    const png = await renderRecapPng(recap);
+    res.type('png').set('Cache-Control', 'no-store').send(png);
   } catch (err) {
     next(err);
   }

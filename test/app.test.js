@@ -94,11 +94,11 @@ test('rekap mengelompokkan menu free text tanpa peduli kapitalisasi/spasi', () =
   assert.match(empty, /Tidak ada pesanan/);
 });
 
-test('gambar rekap ter-render sebagai PNG dan teks di-escape', () => {
+test('gambar rekap ter-render sebagai PNG dan teks di-escape', async () => {
   const orders = [{ name: 'A & B <x>', food: 'Ayam geprek '.repeat(10), quantity: 1, notes: '' }];
   const recap = { appTitle: 'Makan', batchDate: '2026-10-28', cutoffLabel: '11.00 WIB', orders };
   assert.match(buildRecapSvg(recap), /A &amp; B &lt;x&gt;/);
-  const png = renderRecapPng(recap);
+  const png = await renderRecapPng(recap);
   assert.deepEqual([...png.subarray(1, 4)], [...Buffer.from('PNG')]);
 });
 

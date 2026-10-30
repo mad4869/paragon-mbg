@@ -7,6 +7,8 @@
 
 [functions]
   node_bundler = "esbuild"
+  external_node_modules = ["@libsql/client", "@resvg/resvg-js"]
+  included_files = ["assets/fonts/**"]
 
 [[redirects]]
   from = "/api/*"

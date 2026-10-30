@@ -1,5 +1,4 @@
 import path from 'node:path';
-import { Resvg } from '@resvg/resvg-js';
 import { ROOT_DIR } from './config.js';
 import { formatBatchDate, formatWibTime } from './time.js';
 
@@ -215,7 +214,16 @@ ${parts.join('\n')}
 </svg>`;
 }
 
-export function renderRecapPng(recap) {
+let resvgModule = null;
+async function getResvg() {
+  if (!resvgModule) {
+    resvgModule = await import('@resvg/resvg-js');
+  }
+  return resvgModule.Resvg;
+}
+
+export async function renderRecapPng(recap) {
+  const Resvg = await getResvg();
   const svg = buildRecapSvg(recap);
   const resvg = new Resvg(svg, {
     font: { fontFiles: FONT_FILES, loadSystemFonts: true, defaultFontFamily: 'Inter' },

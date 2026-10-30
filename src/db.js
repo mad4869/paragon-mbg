@@ -7,6 +7,9 @@ export async function openDatabase({ dataDir, url, authToken } = {}) {
   if (url) {
     client = createClient({ url, authToken });
   } else {
+    if (process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+      throw new Error('TURSO_DATABASE_URL belum diatur di Netlify Environment Variables.');
+    }
     const dir = dataDir || 'data';
     fs.mkdirSync(dir, { recursive: true });
     client = createClient({ url: `file:${path.join(dir, 'app.db')}` });

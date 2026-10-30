@@ -61,7 +61,7 @@ export class RecapScheduler {
       const text = buildRecapText(recap);
       let image = null;
       try {
-        image = renderRecapPng(recap);
+        image = await renderRecapPng(recap);
       } catch (err) {
         this.logger.error('[scheduler] Gagal membuat gambar rekap, kirim teks saja:', err);
       }
