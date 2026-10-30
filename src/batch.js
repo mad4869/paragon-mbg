@@ -15,16 +15,25 @@ export class BatchService {
     this.now = now;
   }
 
+  async getClient() {
+    if (this.db && typeof this.db.then === 'function') {
+      this.db = await this.db;
+    }
+    return this.db;
+  }
+
   /** Jam tutup harian (WIB), disimpan di database dan diubah lewat halaman admin. */
   async getCutoff() {
-    const res = await this.db.execute("SELECT value FROM settings WHERE key = 'cutoff_time'");
+    const client = await this.getClient();
+    const res = await client.execute("SELECT value FROM settings WHERE key = 'cutoff_time'");
     return parseCutoff(res.rows[0]?.value) ?? DEFAULT_CUTOFF;
   }
 
   async setCutoff(value) {
     const cutoff = parseCutoff(value);
     if (!cutoff) throw new ValidationError('Jam tutup tidak valid (format JJ:MM, 00:00–23:59).');
-    await this.db.execute({
+    const client = await this.getClient();
+    await client.execute({
       sql: `INSERT INTO settings (key, value) VALUES ('cutoff_time', ?)
             ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
       args: [cutoffToString(cutoff)],
@@ -33,7 +42,8 @@ export class BatchService {
   }
 
   async ensureBatch(batchDate) {
-    await this.db.execute({
+    const client = await this.getClient();
+    await client.execute({
       sql: 'INSERT OR IGNORE INTO batches (batch_date) VALUES (?)',
       args: [batchDate],
     });
@@ -41,7 +51,8 @@ export class BatchService {
   }
 
   async getBatch(batchDate) {
-    const res = await this.db.execute({
+    const client = await this.getClient();
+    const res = await client.execute({
       sql: 'SELECT * FROM batches WHERE batch_date = ?',
       args: [batchDate],
     });
@@ -70,7 +81,8 @@ export class BatchService {
   }
 
   async listOrders(batchDate) {
-    const res = await this.db.execute({
+    const client = await this.getClient();
+    const res = await client.execute({
       sql: 'SELECT * FROM orders WHERE batch_date = ? ORDER BY created_at, id',
       args: [batchDate],
     });
@@ -86,13 +98,14 @@ export class BatchService {
     if (batch.status !== 'open') {
       throw new BatchClosedError('Batch ini sudah ditutup.');
     }
-    const info = await this.db.execute({
+    const client = await this.getClient();
+    const info = await client.execute({
       sql: `INSERT INTO orders (batch_date, name, food, quantity, notes, created_at)
             VALUES (?, ?, ?, ?, ?, ?)`,
       args: [batchDate, order.name, order.food, order.quantity, order.notes, now.toISOString()],
     });
     const id = Number(info.lastInsertRowid);
-    const res = await this.db.execute({
+    const res = await client.execute({
       sql: 'SELECT * FROM orders WHERE id = ?',
       args: [id],
     });
@@ -100,7 +113,8 @@ export class BatchService {
   }
 
   async deleteOrder(id) {
-    const res = await this.db.execute({
+    const client = await this.getClient();
+    const res = await client.execute({
       sql: 'DELETE FROM orders WHERE id = ?',
       args: [id],
     });
@@ -109,7 +123,8 @@ export class BatchService {
 
   async markClosed(batchDate) {
     await this.ensureBatch(batchDate);
-    await this.db.execute({
+    const client = await this.getClient();
+    await client.execute({
       sql: `UPDATE batches SET status = 'closed', closed_at = COALESCE(closed_at, ?)
             WHERE batch_date = ? AND status = 'open'`,
       args: [this.now().toISOString(), batchDate],
@@ -118,7 +133,8 @@ export class BatchService {
 
   /** Buka kembali batch: pesanan tetap ada, riwayat penutupan & pengiriman dihapus. */
   async reopen(batchDate) {
-    await this.db.execute({
+    const client = await this.getClient();
+    await client.execute({
       sql: `UPDATE batches SET status = 'open', closed_at = NULL, sent_at = NULL, send_attempts = 0,
             last_attempt_at = NULL, last_error = NULL WHERE batch_date = ?`,
       args: [batchDate],
@@ -128,14 +144,15 @@ export class BatchService {
 
   async recordAttempt(batchDate, error) {
     const now = this.now().toISOString();
+    const client = await this.getClient();
     if (error) {
-      await this.db.execute({
+      await client.execute({
         sql: `UPDATE batches SET send_attempts = send_attempts + 1, last_attempt_at = ?,
               last_error = ? WHERE batch_date = ?`,
         args: [now, String(error.message || error).slice(0, 1000), batchDate],
       });
     } else {
-      await this.db.execute({
+      await client.execute({
         sql: `UPDATE batches SET status = 'sent', sent_at = ?, send_attempts = send_attempts + 1,
               last_attempt_at = ?, last_error = NULL WHERE batch_date = ?`,
         args: [now, now, batchDate],

@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { BatchClosedError, BatchService, LIMITS, ValidationError } from './batch.js';
 import { config, legacyCutoffEnv, ROOT_DIR } from './config.js';
@@ -9,7 +10,7 @@ import { RecapScheduler } from './scheduler.js';
 import { batchDateOf, cutoffToString, formatCutoff, isPastCutoff, isValidBatchDate } from './time.js';
 import { createWhatsAppSender } from './whatsapp.js';
 
-export const db = await openDatabase({
+export const db = openDatabase({
   dataDir: config.dataDir,
   url: config.tursoDatabaseUrl,
   authToken: config.tursoAuthToken,
@@ -124,7 +125,7 @@ app.get('/api/admin/recap.png', requireAdmin, batchDateParam, async (req, res, n
   }
 });
 
-app.post('/api/admin/send', requireAdmin, batchDateParam, async (req, res, next) => {
+app.post('/api/admin/send', requireAdmin, batchDateParam, async (req, res) => {
   try {
     const cutoff = await batches.getCutoff();
     const now = batches.now();
@@ -217,14 +218,19 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Terjadi kesalahan pada server.' });
 });
 
-// Hanya jalankan listener & scheduler bila bukan di environment serverless lambda
-if (!process.env.NETLIFY && !process.env.AWS_LAMBDA_FUNCTION_NAME) {
-  const initialCutoffLabel = formatCutoff(await batches.getCutoff());
-  app.listen(config.port, () => {
-    console.log(`${config.appTitle} berjalan di http://localhost:${config.port}`);
-    console.log(`Jam tutup: ${initialCutoffLabel} (ubah di /admin) · WhatsApp provider: ${sender.name} · tujuan: ${config.whatsapp.targets.join(', ') || '-'}`);
-    if (legacyCutoffEnv) console.warn('CUTOFF_TIME di .env tidak dipakai lagi; atur jam tutup di halaman /admin.');
-    if (!config.adminToken) console.warn('ADMIN_TOKEN belum diset: halaman admin tidak bisa diakses.');
-    scheduler.start(config.schedulerIntervalMs);
+// Hanya jalankan listener & scheduler bila dijalankan langsung (bukan di-import oleh serverless lambda)
+const isDirectRun = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+if (isDirectRun && !process.env.NETLIFY && !process.env.AWS_LAMBDA_FUNCTION_NAME) {
+  batches.getCutoff().then((cutoff) => {
+    const initialCutoffLabel = formatCutoff(cutoff);
+    app.listen(config.port, () => {
+      console.log(`${config.appTitle} berjalan di http://localhost:${config.port}`);
+      console.log(`Jam tutup: ${initialCutoffLabel} (ubah di /admin) · WhatsApp provider: ${sender.name} · tujuan: ${config.whatsapp.targets.join(', ') || '-'}`);
+      if (legacyCutoffEnv) console.warn('CUTOFF_TIME di .env tidak dipakai lagi; atur jam tutup di halaman /admin.');
+      if (!config.adminToken) console.warn('ADMIN_TOKEN belum diset: halaman admin tidak bisa diakses.');
+      scheduler.start(config.schedulerIntervalMs);
+    });
+  }).catch((err) => {
+    console.error('Gagal membaca pengaturan database:', err);
   });
 }
