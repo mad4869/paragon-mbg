@@ -8,7 +8,16 @@ try {
   // .env opsional
 }
 
-export const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+function getRootDir() {
+  try {
+    if (typeof import.meta !== 'undefined' && import.meta?.url) {
+      return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+    }
+  } catch {}
+  return process.cwd();
+}
+
+export const ROOT_DIR = getRootDir();
 
 function parseBool(value, fallback) {
   if (value === undefined || value === '') return fallback;

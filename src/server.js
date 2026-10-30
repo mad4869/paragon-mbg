@@ -248,8 +248,17 @@ app.use((err, req, res, next) => {
 });
 
 // Hanya jalankan listener & scheduler bila dijalankan langsung (bukan di-import oleh serverless lambda)
-const isDirectRun = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
-if (isDirectRun && !process.env.NETLIFY && !process.env.AWS_LAMBDA_FUNCTION_NAME) {
+function checkDirectRun() {
+  if (process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME) return false;
+  try {
+    if (typeof import.meta !== 'undefined' && import.meta?.url && process.argv[1]) {
+      return fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+    }
+  } catch {}
+  return false;
+}
+
+if (checkDirectRun()) {
   batches.getCutoff().then((cutoff) => {
     const initialCutoffLabel = formatCutoff(cutoff);
     app.listen(config.port, () => {
