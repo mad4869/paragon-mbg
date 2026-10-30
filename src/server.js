@@ -9,11 +9,15 @@ import { RecapScheduler } from './scheduler.js';
 import { batchDateOf, cutoffToString, formatCutoff, isPastCutoff, isValidBatchDate } from './time.js';
 import { createWhatsAppSender } from './whatsapp.js';
 
-const db = openDatabase(config.dataDir);
-const batches = new BatchService(db);
-const cutoffLabel = () => formatCutoff(batches.cutoff);
-const sender = createWhatsAppSender(config.whatsapp, { dataDir: config.dataDir });
-const scheduler = new RecapScheduler({
+export const db = await openDatabase({
+  dataDir: config.dataDir,
+  url: config.tursoDatabaseUrl,
+  authToken: config.tursoAuthToken,
+});
+export const batches = new BatchService(db);
+const cutoffLabel = async () => formatCutoff(await batches.getCutoff());
+export const sender = createWhatsAppSender(config.whatsapp, { dataDir: config.dataDir });
+export const scheduler = new RecapScheduler({
   batches,
   sender,
   appTitle: config.appTitle,
@@ -22,30 +26,51 @@ const scheduler = new RecapScheduler({
   maxSendAttempts: config.maxSendAttempts,
 });
 
-const app = express();
+export const app = express();
 app.disable('x-powered-by');
 app.use(express.json({ limit: '10kb' }));
 app.use(express.static(path.join(ROOT_DIR, 'public')));
 
-const publicOrder = ({ id, batch_date, name, food, quantity, notes, created_at }) => ({ id, batchDate: batch_date, name, food, quantity, notes, createdAt: created_at });
+const publicOrder = ({ id, batch_date, name, food, quantity, notes, created_at }) => ({
+  id,
+  batchDate: batch_date,
+  name,
+  food,
+  quantity,
+  notes,
+  createdAt: created_at,
+});
 
 // ---------------------------------------------------------------- publik
 
-app.get('/api/status', (req, res) => {
-  res.json({ ...batches.currentStatus(), appTitle: config.appTitle, cutoffLabel: cutoffLabel(), limits: LIMITS });
-});
-
-app.get('/api/orders', (req, res) => {
-  res.json(batches.listOrders(batches.openBatchDate()).map(publicOrder));
-});
-
-app.post('/api/orders', (req, res) => {
+app.get('/api/status', async (req, res, next) => {
   try {
-    res.status(201).json(publicOrder(batches.placeOrder(req.body)));
+    const status = await batches.currentStatus();
+    const label = await cutoffLabel();
+    res.json({ ...status, appTitle: config.appTitle, cutoffLabel: label, limits: LIMITS });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/api/orders', async (req, res, next) => {
+  try {
+    const openDate = await batches.openBatchDate();
+    const orders = await batches.listOrders(openDate);
+    res.json(orders.map(publicOrder));
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/api/orders', async (req, res, next) => {
+  try {
+    const order = await batches.placeOrder(req.body);
+    res.status(201).json(publicOrder(order));
   } catch (err) {
     if (err instanceof ValidationError) return res.status(400).json({ error: err.message });
     if (err instanceof BatchClosedError) return res.status(409).json({ error: err.message });
-    throw err;
+    next(err);
   }
 });
 
@@ -69,76 +94,120 @@ function batchDateParam(req, res, next) {
   next();
 }
 
-app.get('/api/admin/batch', requireAdmin, batchDateParam, (req, res) => {
-  res.json({
-    batch: batches.getBatch(req.batchDate) ?? { batch_date: req.batchDate, status: 'open', send_attempts: 0 },
-    orders: batches.listOrders(req.batchDate).map(publicOrder),
-    recapText: buildRecapText(scheduler.buildRecap(req.batchDate)),
-    whatsapp: { provider: sender.name, targets: config.whatsapp.targets },
-    isToday: req.batchDate === batchDateOf(batches.now()),
-    pastCutoff: isPastCutoff(batches.cutoff, batches.now()),
-    cutoffLabel: cutoffLabel(),
-  });
-});
-
-app.get('/api/admin/recap.png', requireAdmin, batchDateParam, (req, res) => {
-  res.type('png').set('Cache-Control', 'no-store').send(renderRecapPng(scheduler.buildRecap(req.batchDate)));
-});
-
-app.post('/api/admin/send', requireAdmin, batchDateParam, async (req, res) => {
-  const today = batchDateOf(batches.now());
-  if (req.batchDate > today || (req.batchDate === today && !isPastCutoff(batches.cutoff, batches.now()))) {
-    return res.status(409).json({ error: `Batch masih dibuka. Rekap baru bisa dikirim setelah ${cutoffLabel()}.` });
-  }
+app.get('/api/admin/batch', requireAdmin, batchDateParam, async (req, res, next) => {
   try {
-    batches.ensureBatch(req.batchDate);
-    batches.markClosed(req.batchDate);
+    const batch = await batches.getBatch(req.batchDate);
+    const orders = await batches.listOrders(req.batchDate);
+    const recap = await scheduler.buildRecap(req.batchDate);
+    const cutoff = await batches.getCutoff();
+    const now = batches.now();
+    res.json({
+      batch: batch ?? { batch_date: req.batchDate, status: 'open', send_attempts: 0 },
+      orders: orders.map(publicOrder),
+      recapText: buildRecapText(recap),
+      whatsapp: { provider: sender.name, targets: config.whatsapp.targets },
+      isToday: req.batchDate === batchDateOf(now),
+      pastCutoff: isPastCutoff(cutoff, now),
+      cutoffLabel: formatCutoff(cutoff),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/api/admin/recap.png', requireAdmin, batchDateParam, async (req, res, next) => {
+  try {
+    const recap = await scheduler.buildRecap(req.batchDate);
+    res.type('png').set('Cache-Control', 'no-store').send(renderRecapPng(recap));
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/api/admin/send', requireAdmin, batchDateParam, async (req, res, next) => {
+  try {
+    const cutoff = await batches.getCutoff();
+    const now = batches.now();
+    const today = batchDateOf(now);
+    if (req.batchDate > today || (req.batchDate === today && !isPastCutoff(cutoff, now))) {
+      return res.status(409).json({ error: `Batch masih dibuka. Rekap baru bisa dikirim setelah ${formatCutoff(cutoff)}.` });
+    }
+    await batches.ensureBatch(req.batchDate);
+    await batches.markClosed(req.batchDate);
     await scheduler.sendRecap(req.batchDate);
-    res.json({ ok: true, batch: batches.getBatch(req.batchDate) });
+    res.json({ ok: true, batch: await batches.getBatch(req.batchDate) });
   } catch (err) {
     res.status(502).json({ error: err.message });
   }
 });
 
-// Hanya batch hari ini yang bisa di-reset: batch lama tidak lagi menerima pesanan
-// maupun dikirim otomatis, sedangkan batch besok memang masih dibuka.
-app.post('/api/admin/reopen', requireAdmin, batchDateParam, (req, res) => {
-  if (req.batchDate !== batchDateOf(batches.now())) {
-    return res.status(409).json({ error: 'Hanya batch hari ini yang bisa di-reset.' });
+app.post('/api/admin/reopen', requireAdmin, batchDateParam, async (req, res, next) => {
+  try {
+    if (req.batchDate !== batchDateOf(batches.now())) {
+      return res.status(409).json({ error: 'Hanya batch hari ini yang bisa di-reset.' });
+    }
+    const batch = await batches.getBatch(req.batchDate);
+    if (!batch || batch.status === 'open') {
+      return res.status(409).json({ error: 'Batch ini masih dibuka, tidak perlu di-reset.' });
+    }
+    res.json({ ok: true, batch: await batches.reopen(req.batchDate) });
+  } catch (err) {
+    next(err);
   }
-  const batch = batches.getBatch(req.batchDate);
-  if (!batch || batch.status === 'open') {
-    return res.status(409).json({ error: 'Batch ini masih dibuka, tidak perlu di-reset.' });
-  }
-  res.json({ ok: true, batch: batches.reopen(req.batchDate) });
 });
 
-function settingsResponse() {
-  const today = batchDateOf(batches.now());
+async function settingsResponse() {
+  const now = batches.now();
+  const today = batchDateOf(now);
+  const cutoff = await batches.getCutoff();
+  const todayBatch = await batches.getBatch(today);
   return {
-    cutoffTime: cutoffToString(batches.cutoff),
-    cutoffLabel: cutoffLabel(),
-    pastCutoff: isPastCutoff(batches.cutoff, batches.now()),
-    todayStatus: batches.getBatch(today)?.status ?? 'open',
+    cutoffTime: cutoffToString(cutoff),
+    cutoffLabel: formatCutoff(cutoff),
+    pastCutoff: isPastCutoff(cutoff, now),
+    todayStatus: todayBatch?.status ?? 'open',
   };
 }
 
-app.get('/api/admin/settings', requireAdmin, (req, res) => res.json(settingsResponse()));
-
-app.put('/api/admin/settings', requireAdmin, (req, res) => {
+app.get('/api/admin/settings', requireAdmin, async (req, res, next) => {
   try {
-    batches.setCutoff(req.body?.cutoffTime);
+    res.json(await settingsResponse());
   } catch (err) {
-    if (err instanceof ValidationError) return res.status(400).json({ error: err.message });
-    throw err;
+    next(err);
   }
-  console.log(`[admin] Jam tutup diubah menjadi ${cutoffLabel()}.`);
-  res.json(settingsResponse());
 });
 
-app.delete('/api/admin/orders/:id', requireAdmin, (req, res) => {
-  if (!batches.deleteOrder(Number(req.params.id))) return res.status(404).json({ error: 'Pesanan tidak ditemukan.' });
-  res.status(204).end();
+app.put('/api/admin/settings', requireAdmin, async (req, res, next) => {
+  try {
+    await batches.setCutoff(req.body?.cutoffTime);
+    const label = formatCutoff(await batches.getCutoff());
+    console.log(`[admin] Jam tutup diubah menjadi ${label}.`);
+    res.json(await settingsResponse());
+  } catch (err) {
+    if (err instanceof ValidationError) return res.status(400).json({ error: err.message });
+    next(err);
+  }
+});
+
+app.delete('/api/admin/orders/:id', requireAdmin, async (req, res, next) => {
+  try {
+    if (!(await batches.deleteOrder(Number(req.params.id)))) {
+      return res.status(404).json({ error: 'Pesanan tidak ditemukan.' });
+    }
+    res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Endpoint untuk webhook / cron runner
+app.post('/api/cron/tick', async (req, res, next) => {
+  try {
+    await scheduler.tick();
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
 });
 
 app.get('/admin', (req, res) => res.sendFile(path.join(ROOT_DIR, 'public', 'admin.html')));
@@ -148,10 +217,14 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Terjadi kesalahan pada server.' });
 });
 
-app.listen(config.port, () => {
-  console.log(`${config.appTitle} berjalan di http://localhost:${config.port}`);
-  console.log(`Jam tutup: ${cutoffLabel()} (ubah di /admin) · WhatsApp provider: ${sender.name} · tujuan: ${config.whatsapp.targets.join(', ') || '-'}`);
-  if (legacyCutoffEnv) console.warn('CUTOFF_TIME di .env tidak dipakai lagi; atur jam tutup di halaman /admin.');
-  if (!config.adminToken) console.warn('ADMIN_TOKEN belum diset: halaman admin tidak bisa diakses.');
-  scheduler.start(config.schedulerIntervalMs);
-});
+// Hanya jalankan listener & scheduler bila bukan di environment serverless lambda
+if (!process.env.NETLIFY && !process.env.AWS_LAMBDA_FUNCTION_NAME) {
+  const initialCutoffLabel = formatCutoff(await batches.getCutoff());
+  app.listen(config.port, () => {
+    console.log(`${config.appTitle} berjalan di http://localhost:${config.port}`);
+    console.log(`Jam tutup: ${initialCutoffLabel} (ubah di /admin) · WhatsApp provider: ${sender.name} · tujuan: ${config.whatsapp.targets.join(', ') || '-'}`);
+    if (legacyCutoffEnv) console.warn('CUTOFF_TIME di .env tidak dipakai lagi; atur jam tutup di halaman /admin.');
+    if (!config.adminToken) console.warn('ADMIN_TOKEN belum diset: halaman admin tidak bisa diakses.');
+    scheduler.start(config.schedulerIntervalMs);
+  });
+}

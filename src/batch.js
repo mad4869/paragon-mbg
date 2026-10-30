@@ -16,104 +16,130 @@ export class BatchService {
   }
 
   /** Jam tutup harian (WIB), disimpan di database dan diubah lewat halaman admin. */
-  get cutoff() {
-    const row = this.db.prepare("SELECT value FROM settings WHERE key = 'cutoff_time'").get();
-    return parseCutoff(row?.value) ?? DEFAULT_CUTOFF;
+  async getCutoff() {
+    const res = await this.db.execute("SELECT value FROM settings WHERE key = 'cutoff_time'");
+    return parseCutoff(res.rows[0]?.value) ?? DEFAULT_CUTOFF;
   }
 
-  setCutoff(value) {
+  async setCutoff(value) {
     const cutoff = parseCutoff(value);
     if (!cutoff) throw new ValidationError('Jam tutup tidak valid (format JJ:MM, 00:00–23:59).');
-    this.db
-      .prepare(`INSERT INTO settings (key, value) VALUES ('cutoff_time', ?)
-                ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
-      .run(cutoffToString(cutoff));
+    await this.db.execute({
+      sql: `INSERT INTO settings (key, value) VALUES ('cutoff_time', ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      args: [cutoffToString(cutoff)],
+    });
     return cutoff;
   }
 
-  ensureBatch(batchDate) {
-    this.db.prepare('INSERT OR IGNORE INTO batches (batch_date) VALUES (?)').run(batchDate);
+  async ensureBatch(batchDate) {
+    await this.db.execute({
+      sql: 'INSERT OR IGNORE INTO batches (batch_date) VALUES (?)',
+      args: [batchDate],
+    });
     return this.getBatch(batchDate);
   }
 
-  getBatch(batchDate) {
-    return this.db.prepare('SELECT * FROM batches WHERE batch_date = ?').get(batchDate) ?? null;
+  async getBatch(batchDate) {
+    const res = await this.db.execute({
+      sql: 'SELECT * FROM batches WHERE batch_date = ?',
+      args: [batchDate],
+    });
+    return res.rows[0] ?? null;
   }
 
   /** Batch yang sedang menerima pesanan: hari ini sebelum cutoff, besok setelahnya. */
-  openBatchDate(now = this.now()) {
-    return openBatchDateOf(this.cutoff, now);
+  async openBatchDate(now = this.now()) {
+    const cutoff = await this.getCutoff();
+    return openBatchDateOf(cutoff, now);
   }
 
   /** Status batch yang sedang dibuka, untuk ditampilkan di halaman. */
-  currentStatus() {
+  async currentStatus() {
     const now = this.now();
-    const batchDate = this.openBatchDate(now);
-    const batch = this.getBatch(batchDate);
+    const cutoff = await this.getCutoff();
+    const batchDate = openBatchDateOf(cutoff, now);
+    const batch = await this.getBatch(batchDate);
     return {
       batchDate,
       today: batchDateOf(now),
       open: !batch || batch.status === 'open',
-      cutoffAt: cutoffInstant(batchDate, this.cutoff).toISOString(),
+      cutoffAt: cutoffInstant(batchDate, cutoff).toISOString(),
       serverTime: now.toISOString(),
     };
   }
 
-  listOrders(batchDate) {
-    return this.db
-      .prepare('SELECT * FROM orders WHERE batch_date = ? ORDER BY created_at, id')
-      .all(batchDate);
+  async listOrders(batchDate) {
+    const res = await this.db.execute({
+      sql: 'SELECT * FROM orders WHERE batch_date = ? ORDER BY created_at, id',
+      args: [batchDate],
+    });
+    return res.rows;
   }
 
-  placeOrder(input) {
+  async placeOrder(input) {
     const order = validateOrder(input);
     const now = this.now();
-    const batchDate = this.openBatchDate(now);
-    const batch = this.ensureBatch(batchDate);
+    const batchDate = await this.openBatchDate(now);
+    const batch = await this.ensureBatch(batchDate);
     // Normalnya selalu "open"; berjaga-jaga bila batch sudah ditutup lebih awal.
     if (batch.status !== 'open') {
       throw new BatchClosedError('Batch ini sudah ditutup.');
     }
-    const info = this.db
-      .prepare(`INSERT INTO orders (batch_date, name, food, quantity, notes, created_at)
-                VALUES (@batchDate, @name, @food, @quantity, @notes, @createdAt)`)
-      .run({ ...order, batchDate, createdAt: now.toISOString() });
-    return this.db.prepare('SELECT * FROM orders WHERE id = ?').get(info.lastInsertRowid);
+    const info = await this.db.execute({
+      sql: `INSERT INTO orders (batch_date, name, food, quantity, notes, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)`,
+      args: [batchDate, order.name, order.food, order.quantity, order.notes, now.toISOString()],
+    });
+    const id = Number(info.lastInsertRowid);
+    const res = await this.db.execute({
+      sql: 'SELECT * FROM orders WHERE id = ?',
+      args: [id],
+    });
+    return res.rows[0];
   }
 
-  deleteOrder(id) {
-    return this.db.prepare('DELETE FROM orders WHERE id = ?').run(id).changes > 0;
+  async deleteOrder(id) {
+    const res = await this.db.execute({
+      sql: 'DELETE FROM orders WHERE id = ?',
+      args: [id],
+    });
+    return res.rowsAffected > 0;
   }
 
-  markClosed(batchDate) {
-    this.ensureBatch(batchDate);
-    this.db
-      .prepare(`UPDATE batches SET status = 'closed', closed_at = COALESCE(closed_at, ?)
-                WHERE batch_date = ? AND status = 'open'`)
-      .run(this.now().toISOString(), batchDate);
+  async markClosed(batchDate) {
+    await this.ensureBatch(batchDate);
+    await this.db.execute({
+      sql: `UPDATE batches SET status = 'closed', closed_at = COALESCE(closed_at, ?)
+            WHERE batch_date = ? AND status = 'open'`,
+      args: [this.now().toISOString(), batchDate],
+    });
   }
 
   /** Buka kembali batch: pesanan tetap ada, riwayat penutupan & pengiriman dihapus. */
-  reopen(batchDate) {
-    this.db
-      .prepare(`UPDATE batches SET status = 'open', closed_at = NULL, sent_at = NULL, send_attempts = 0,
-                last_attempt_at = NULL, last_error = NULL WHERE batch_date = ?`)
-      .run(batchDate);
+  async reopen(batchDate) {
+    await this.db.execute({
+      sql: `UPDATE batches SET status = 'open', closed_at = NULL, sent_at = NULL, send_attempts = 0,
+            last_attempt_at = NULL, last_error = NULL WHERE batch_date = ?`,
+      args: [batchDate],
+    });
     return this.getBatch(batchDate);
   }
 
-  recordAttempt(batchDate, error) {
+  async recordAttempt(batchDate, error) {
     const now = this.now().toISOString();
     if (error) {
-      this.db
-        .prepare(`UPDATE batches SET send_attempts = send_attempts + 1, last_attempt_at = ?,
-                  last_error = ? WHERE batch_date = ?`)
-        .run(now, String(error.message || error).slice(0, 1000), batchDate);
+      await this.db.execute({
+        sql: `UPDATE batches SET send_attempts = send_attempts + 1, last_attempt_at = ?,
+              last_error = ? WHERE batch_date = ?`,
+        args: [now, String(error.message || error).slice(0, 1000), batchDate],
+      });
     } else {
-      this.db
-        .prepare(`UPDATE batches SET status = 'sent', sent_at = ?, send_attempts = send_attempts + 1,
-                  last_attempt_at = ?, last_error = NULL WHERE batch_date = ?`)
-        .run(now, now, batchDate);
+      await this.db.execute({
+        sql: `UPDATE batches SET status = 'sent', sent_at = ?, send_attempts = send_attempts + 1,
+              last_attempt_at = ?, last_error = NULL WHERE batch_date = ?`,
+        args: [now, now, batchDate],
+      });
     }
   }
 }

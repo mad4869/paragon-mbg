@@ -29,6 +29,8 @@ export const config = {
   schedulerIntervalMs: Number(env.SCHEDULER_INTERVAL_MS || 30_000),
   retryDelayMs: Number(env.RETRY_DELAY_MS || 5 * 60_000),
   maxSendAttempts: Number(env.MAX_SEND_ATTEMPTS || 5),
+  tursoDatabaseUrl: env.TURSO_DATABASE_URL || '',
+  tursoAuthToken: env.TURSO_AUTH_TOKEN || '',
   whatsapp: {
     provider: (env.WA_PROVIDER || 'console').toLowerCase(),
     targets: (env.WA_TARGETS || '')

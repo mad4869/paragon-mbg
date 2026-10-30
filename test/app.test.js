@@ -13,10 +13,10 @@ import { chunkText } from '../src/whatsapp.js';
 const CUTOFF = { hour: 11, minute: 0 };
 const wib = (iso) => new Date(`${iso}+07:00`);
 
-function setup(startIso) {
+async function setup(startIso) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pesan-makan-'));
   const clock = { now: wib(startIso) };
-  const db = openDatabase(dir);
+  const db = await openDatabase({ dataDir: dir });
   const batches = new BatchService(db, { now: () => clock.now });
   return { dir, clock, batches };
 }
@@ -32,47 +32,47 @@ test('tanggal batch dan cutoff mengikuti WIB', () => {
   assert.equal(formatBatchDate('2026-10-28'), 'Rabu, 28 Oktober 2026');
 });
 
-test('pesanan setelah cutoff otomatis masuk batch besok', () => {
-  const { clock, batches } = setup('2026-10-28T09:00:00');
-  const order = batches.placeOrder({ name: '  Andi ', food: 'Nasi   goreng', quantity: '2' });
+test('pesanan setelah cutoff otomatis masuk batch besok', async () => {
+  const { clock, batches } = await setup('2026-10-28T09:00:00');
+  const order = await batches.placeOrder({ name: '  Andi ', food: 'Nasi   goreng', quantity: '2' });
   assert.equal(order.name, 'Andi');
   assert.equal(order.food, 'Nasi goreng');
   assert.equal(order.quantity, 2);
   assert.equal(order.batch_date, '2026-10-28');
-  assert.equal(batches.currentStatus().batchDate, '2026-10-28');
+  assert.equal((await batches.currentStatus()).batchDate, '2026-10-28');
 
   clock.now = wib('2026-10-28T11:00:00');
-  const status = batches.currentStatus();
+  const status = await batches.currentStatus();
   assert.equal(status.batchDate, '2026-10-29');
   assert.equal(status.today, '2026-10-28');
   assert.equal(status.cutoffAt, '2026-10-29T04:00:00.000Z');
-  assert.equal(batches.placeOrder({ name: 'Budi', food: 'Soto' }).batch_date, '2026-10-29');
+  assert.equal((await batches.placeOrder({ name: 'Budi', food: 'Soto' })).batch_date, '2026-10-29');
 
   // Lewat tengah malam: tetap batch yang sama sampai cutoff berikutnya
   clock.now = wib('2026-10-29T08:00:00');
-  assert.equal(batches.placeOrder({ name: 'Citra', food: 'Bakso' }).batch_date, '2026-10-29');
-  assert.equal(batches.listOrders('2026-10-28').length, 1);
-  assert.equal(batches.listOrders('2026-10-29').length, 2);
+  assert.equal((await batches.placeOrder({ name: 'Citra', food: 'Bakso' })).batch_date, '2026-10-29');
+  assert.equal((await batches.listOrders('2026-10-28')).length, 1);
+  assert.equal((await batches.listOrders('2026-10-29')).length, 2);
 
   // Pergantian bulan
   clock.now = wib('2026-10-31T15:00:00');
-  assert.equal(batches.placeOrder({ name: 'Dewi', food: 'Pecel' }).batch_date, '2026-11-01');
+  assert.equal((await batches.placeOrder({ name: 'Dewi', food: 'Pecel' })).batch_date, '2026-11-01');
 });
 
-test('batch yang sudah ditutup lebih awal menolak pesanan', () => {
-  const { batches } = setup('2026-10-28T09:00:00');
-  batches.markClosed('2026-10-28');
-  assert.equal(batches.currentStatus().open, false);
-  assert.throws(() => batches.placeOrder({ name: 'Andi', food: 'Soto' }), BatchClosedError);
+test('batch yang sudah ditutup lebih awal menolak pesanan', async () => {
+  const { batches } = await setup('2026-10-28T09:00:00');
+  await batches.markClosed('2026-10-28');
+  assert.equal((await batches.currentStatus()).open, false);
+  await assert.rejects(batches.placeOrder({ name: 'Andi', food: 'Soto' }), BatchClosedError);
 });
 
-test('validasi input pesanan', () => {
-  const { batches } = setup('2026-10-28T09:00:00');
-  assert.throws(() => batches.placeOrder({ name: '', food: 'Soto' }), ValidationError);
-  assert.throws(() => batches.placeOrder({ name: 'A', food: '   ' }), ValidationError);
-  assert.throws(() => batches.placeOrder({ name: 'A', food: 'Soto', quantity: 0 }), ValidationError);
-  assert.throws(() => batches.placeOrder({ name: 'A', food: 'Soto', quantity: 1.5 }), ValidationError);
-  assert.throws(() => batches.placeOrder({ name: 'A', food: 'x'.repeat(201) }), ValidationError);
+test('validasi input pesanan', async () => {
+  const { batches } = await setup('2026-10-28T09:00:00');
+  await assert.rejects(batches.placeOrder({ name: '', food: 'Soto' }), ValidationError);
+  await assert.rejects(batches.placeOrder({ name: 'A', food: '   ' }), ValidationError);
+  await assert.rejects(batches.placeOrder({ name: 'A', food: 'Soto', quantity: 0 }), ValidationError);
+  await assert.rejects(batches.placeOrder({ name: 'A', food: 'Soto', quantity: 1.5 }), ValidationError);
+  await assert.rejects(batches.placeOrder({ name: 'A', food: 'x'.repeat(201) }), ValidationError);
 });
 
 test('rekap mengelompokkan menu free text tanpa peduli kapitalisasi/spasi', () => {
@@ -110,7 +110,7 @@ test('wrapText dan chunkText membatasi panjang baris', () => {
 });
 
 test('scheduler mengirim sekali setelah cutoff dan retry bila gagal', async () => {
-  const { clock, batches } = setup('2026-10-28T10:00:00');
+  const { clock, batches } = await setup('2026-10-28T10:00:00');
   const sent = [];
   let failNext = true;
   const sender = {
@@ -128,16 +128,16 @@ test('scheduler mengirim sekali setelah cutoff dan retry bila gagal', async () =
     sendWhenEmpty: true, retryDelayMs: 60_000, maxSendAttempts: 3, logger: silent,
   });
 
-  batches.placeOrder({ name: 'Andi', food: 'Soto', quantity: 1 });
+  await batches.placeOrder({ name: 'Andi', food: 'Soto', quantity: 1 });
   await scheduler.tick();
   assert.equal(sent.length, 0, 'belum lewat cutoff');
 
   clock.now = wib('2026-10-28T11:00:10');
   // Pesanan setelah cutoff masuk batch besok, tidak ikut rekap hari ini
-  batches.placeOrder({ name: 'Telat', food: 'Bakso', quantity: 1 });
+  await batches.placeOrder({ name: 'Telat', food: 'Bakso', quantity: 1 });
   await assert.rejects(scheduler.tick(), /jaringan putus/);
-  assert.equal(batches.getBatch('2026-10-28').status, 'closed');
-  assert.equal(batches.getBatch('2026-10-28').last_error, 'jaringan putus');
+  assert.equal((await batches.getBatch('2026-10-28')).status, 'closed');
+  assert.equal((await batches.getBatch('2026-10-28')).last_error, 'jaringan putus');
 
   clock.now = wib('2026-10-28T11:00:40');
   await scheduler.tick();
@@ -150,7 +150,7 @@ test('scheduler mengirim sekali setelah cutoff dan retry bila gagal', async () =
   assert.doesNotMatch(sent[0].text, /Bakso/);
   assert.ok(Buffer.isBuffer(sent[0].image));
   assert.equal(sent[0].filename, 'rekap-2026-10-28.png');
-  assert.equal(batches.getBatch('2026-10-28').status, 'sent');
+  assert.equal((await batches.getBatch('2026-10-28')).status, 'sent');
 
   clock.now = wib('2026-10-28T13:00:00');
   await scheduler.tick();
@@ -158,7 +158,7 @@ test('scheduler mengirim sekali setelah cutoff dan retry bila gagal', async () =
 });
 
 test('batch kosong tidak dikirim bila SEND_WHEN_EMPTY=false', async () => {
-  const { batches } = setup('2026-10-28T11:30:00');
+  const { batches } = await setup('2026-10-28T11:30:00');
   const sent = [];
   const scheduler = new RecapScheduler({
     batches, sender: { name: 'fake', send: async (p) => sent.push(p) }, appTitle: 'Makan',
@@ -166,11 +166,11 @@ test('batch kosong tidak dikirim bila SEND_WHEN_EMPTY=false', async () => {
   });
   await scheduler.tick();
   assert.equal(sent.length, 0);
-  assert.equal(batches.getBatch('2026-10-28').status, 'sent');
+  assert.equal((await batches.getBatch('2026-10-28')).status, 'sent');
 });
 
 test('reset batch: pesanan diterima lagi dan rekap dikirim ulang di cutoff baru', async () => {
-  const { clock, batches } = setup('2026-10-28T11:30:00');
+  const { clock, batches } = await setup('2026-10-28T11:30:00');
   const sent = [];
   const scheduler = new RecapScheduler({
     batches, sender: { name: 'fake', send: async (p) => sent.push(p) }, appTitle: 'Makan',
@@ -182,16 +182,16 @@ test('reset batch: pesanan diterima lagi dan rekap dikirim ulang di cutoff baru'
   assert.equal(sent.length, 1);
 
   // Cutoff dimundurkan ke 15.00: batch tetap tertutup sampai di-reset
-  batches.setCutoff('15:00');
+  await batches.setCutoff('15:00');
   clock.now = wib('2026-10-28T12:00:00');
-  assert.equal(batches.currentStatus().open, false);
-  assert.throws(() => batches.placeOrder({ name: 'Andi', food: 'Soto' }), BatchClosedError);
+  assert.equal((await batches.currentStatus()).open, false);
+  await assert.rejects(batches.placeOrder({ name: 'Andi', food: 'Soto' }), BatchClosedError);
 
-  const batch = batches.reopen('2026-10-28');
+  const batch = await batches.reopen('2026-10-28');
   assert.equal(batch.status, 'open');
   assert.equal(batch.send_attempts, 0);
   assert.equal(batch.sent_at, null);
-  assert.equal(batches.placeOrder({ name: 'Andi', food: 'Soto' }).batch_date, '2026-10-28');
+  assert.equal((await batches.placeOrder({ name: 'Andi', food: 'Soto' })).batch_date, '2026-10-28');
 
   await scheduler.tick();
   assert.equal(sent.length, 1, 'belum lewat cutoff baru');
@@ -202,22 +202,23 @@ test('reset batch: pesanan diterima lagi dan rekap dikirim ulang di cutoff baru'
 });
 
 test('jam tutup disimpan di database dan langsung berlaku', async () => {
-  const { dir, clock, batches } = setup('2026-10-28T12:00:00');
-  assert.deepEqual(batches.cutoff, { hour: 11, minute: 0 }, 'default 11.00');
-  assert.equal(batches.currentStatus().batchDate, '2026-10-29');
+  const { dir, clock, batches } = await setup('2026-10-28T12:00:00');
+  assert.deepEqual(await batches.getCutoff(), { hour: 11, minute: 0 }, 'default 11.00');
+  assert.equal((await batches.currentStatus()).batchDate, '2026-10-29');
 
-  assert.deepEqual(batches.setCutoff('14.30'), { hour: 14, minute: 30 });
-  assert.equal(batches.currentStatus().batchDate, '2026-10-28', 'langsung berlaku tanpa restart');
-  assert.equal(batches.currentStatus().cutoffAt, '2026-10-28T07:30:00.000Z');
+  assert.deepEqual(await batches.setCutoff('14.30'), { hour: 14, minute: 30 });
+  assert.equal((await batches.currentStatus()).batchDate, '2026-10-28', 'langsung berlaku tanpa restart');
+  assert.equal((await batches.currentStatus()).cutoffAt, '2026-10-28T07:30:00.000Z');
 
   for (const bad of ['', '24:00', '12:60', 'jam 11', undefined]) {
-    assert.throws(() => batches.setCutoff(bad), ValidationError);
+    await assert.rejects(batches.setCutoff(bad), ValidationError);
   }
-  assert.deepEqual(batches.cutoff, { hour: 14, minute: 30 }, 'nilai lama tetap bila input salah');
+  assert.deepEqual(await batches.getCutoff(), { hour: 14, minute: 30 }, 'nilai lama tetap bila input salah');
 
   // Tetap tersimpan setelah aplikasi dijalankan ulang
-  const reopened = new BatchService(openDatabase(dir), { now: () => clock.now });
-  assert.deepEqual(reopened.cutoff, { hour: 14, minute: 30 });
+  const db2 = await openDatabase({ dataDir: dir });
+  const reopened = new BatchService(db2, { now: () => clock.now });
+  assert.deepEqual(await reopened.getCutoff(), { hour: 14, minute: 30 });
 
   // Scheduler mengikuti jam tutup yang baru
   const sent = [];

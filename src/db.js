@@ -1,19 +1,21 @@
 import fs from 'node:fs';
 import path from 'node:path';
-// SQLite bawaan Node.js (>= 22.13): tidak perlu kompilasi, Python, atau build tools.
-import { DatabaseSync } from 'node:sqlite';
+import { createClient } from '@libsql/client';
 
-export function openDatabase(dataDir) {
-  fs.mkdirSync(dataDir, { recursive: true });
-  const db = new DatabaseSync(path.join(dataDir, 'app.db'));
+export async function openDatabase({ dataDir, url, authToken } = {}) {
+  let client;
+  if (url) {
+    client = createClient({ url, authToken });
+  } else {
+    const dir = dataDir || 'data';
+    fs.mkdirSync(dir, { recursive: true });
+    client = createClient({ url: `file:${path.join(dir, 'app.db')}` });
+  }
 
-  db.exec(`
-    PRAGMA journal_mode = WAL;
-    PRAGMA foreign_keys = ON;
-
+  await client.executeMultiple(`
     CREATE TABLE IF NOT EXISTS batches (
-      batch_date       TEXT PRIMARY KEY,           -- YYYY-MM-DD (WIB)
-      status           TEXT NOT NULL DEFAULT 'open', -- open | closed | sent
+      batch_date       TEXT PRIMARY KEY,
+      status           TEXT NOT NULL DEFAULT 'open',
       closed_at        TEXT,
       sent_at          TEXT,
       send_attempts    INTEGER NOT NULL DEFAULT 0,
@@ -39,5 +41,5 @@ export function openDatabase(dataDir) {
     );
   `);
 
-  return db;
+  return client;
 }

@@ -26,28 +26,30 @@ export class RecapScheduler {
 
   async tick() {
     const now = this.batches.now();
-    if (!isPastCutoff(this.batches.cutoff, now)) return;
+    const cutoff = await this.batches.getCutoff();
+    if (!isPastCutoff(cutoff, now)) return;
 
     const batchDate = batchDateOf(now);
-    this.batches.markClosed(batchDate);
-    const batch = this.batches.getBatch(batchDate);
+    await this.batches.markClosed(batchDate);
+    const batch = await this.batches.getBatch(batchDate);
 
     if (batch.status === 'sent') return;
     if (batch.send_attempts >= this.maxSendAttempts) return;
     if (batch.last_attempt_at && now - new Date(batch.last_attempt_at) < this.retryDelayMs) return;
 
-    const orders = this.batches.listOrders(batchDate);
+    const orders = await this.batches.listOrders(batchDate);
     if (orders.length === 0 && !this.sendWhenEmpty) {
-      this.batches.recordAttempt(batchDate, null);
+      await this.batches.recordAttempt(batchDate, null);
       this.logger.log(`[scheduler] Batch ${batchDate} kosong, rekap tidak dikirim (SEND_WHEN_EMPTY=false).`);
       return;
     }
     await this.sendRecap(batchDate);
   }
 
-  buildRecap(batchDate) {
-    const orders = this.batches.listOrders(batchDate);
-    return { appTitle: this.appTitle, batchDate, cutoffLabel: formatCutoff(this.batches.cutoff), orders, generatedAt: this.batches.now() };
+  async buildRecap(batchDate) {
+    const cutoff = await this.batches.getCutoff();
+    const orders = await this.batches.listOrders(batchDate);
+    return { appTitle: this.appTitle, batchDate, cutoffLabel: formatCutoff(cutoff), orders, generatedAt: this.batches.now() };
   }
 
   /** Kirim rekap sebuah batch. Dipakai scheduler maupun tombol "kirim ulang" di admin. */
@@ -55,7 +57,7 @@ export class RecapScheduler {
     if (this.sending) throw new Error('Pengiriman rekap lain sedang berjalan, coba lagi sebentar.');
     this.sending = true;
     try {
-      const recap = this.buildRecap(batchDate);
+      const recap = await this.buildRecap(batchDate);
       const text = buildRecapText(recap);
       let image = null;
       try {
@@ -65,10 +67,10 @@ export class RecapScheduler {
       }
 
       await this.sender.send({ text, image, filename: `rekap-${batchDate}.png` });
-      this.batches.recordAttempt(batchDate, null);
+      await this.batches.recordAttempt(batchDate, null);
       this.logger.log(`[scheduler] Rekap ${batchDate} terkirim via ${this.sender.name} (${recap.orders.length} pesanan).`);
     } catch (err) {
-      this.batches.recordAttempt(batchDate, err);
+      await this.batches.recordAttempt(batchDate, err);
       this.logger.error(`[scheduler] Gagal mengirim rekap ${batchDate}:`, err.message);
       throw err;
     } finally {

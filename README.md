@@ -47,11 +47,30 @@ cp .env.example .env   # lalu sesuaikan isinya
 npm start              # http://localhost:3000
 ```
 
-Data disimpan di SQLite (`data/app.db`).
+Data disimpan di SQLite (`data/app.db`) atau Turso jika `TURSO_DATABASE_URL` diatur.
 
 ```bash
 npm test
 ```
+
+## Deploy ke Netlify
+
+1. Buat database di [Turso](https://turso.tech/) (free), catat **Database URL** dan buat **Auth Token**.
+2. Push repository ini ke GitHub.
+3. Di dashboard [Netlify](https://app.netlify.com/):
+   - **Add new site** → **Import an existing project** → pilih repo Anda.
+   - Atur **Environment variables**:
+     - `TURSO_DATABASE_URL`: URL database Turso Anda (`libsql://...`)
+     - `TURSO_AUTH_TOKEN`: Auth token Turso Anda
+     - `ADMIN_TOKEN`: Token rahasia untuk `/admin`
+     - `APP_TITLE`: Judul web (misal `Paragon MBG`)
+     - `WA_PROVIDER`: Provider WhatsApp (`twilio`, `fonnte`, atau `cloudapi`)
+     - `WA_TARGETS`: Nomor tujuan WhatsApp
+     - Kredensial provider (misal `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM`)
+4. Klik **Deploy site**.
+   - Netlify CDN otomatis menyajikan halaman publik (`public/`).
+   - Endpoint API dilayani oleh Serverless Function (`netlify/functions/api.js`).
+   - Jadwal pengiriman rekap dijalankan otomatis setiap 5 menit oleh Scheduled Function (`netlify/functions/cron.js`).
 
 ## Konfigurasi WhatsApp
 
