@@ -19,9 +19,27 @@ function formatDuration(ms) {
 }
 
 async function api(path, options = {}) {
-  const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...options });
-  const body = res.status === 204 ? null : await res.json().catch(() => null);
-  if (!res.ok) throw new Error(body?.error || `Permintaan gagal (HTTP ${res.status})`);
+  let res;
+  try {
+    res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...options });
+  } catch (err) {
+    console.error(`[API Network Error] ${path}:`, err);
+    throw new Error(`Koneksi gagal: ${err.message}`);
+  }
+
+  const text = await res.text();
+  let body = null;
+  try {
+    body = text ? JSON.parse(text) : null;
+  } catch {
+    console.error(`[API Non-JSON HTTP ${res.status}] ${path}:`, text);
+  }
+
+  if (!res.ok) {
+    const msg = body?.error || (text && text.length < 200 ? text : null) || `HTTP ${res.status}`;
+    console.error(`[API Error ${res.status}] ${path}:`, msg);
+    throw new Error(`Permintaan gagal: ${msg}`);
+  }
   return body;
 }
 

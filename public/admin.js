@@ -14,14 +14,24 @@ function formatDateTime(iso) {
 }
 
 async function api(path, options = {}) {
-  const res = await fetch(path, { ...options, headers: { 'X-Admin-Token': token, ...options.headers } });
+  let res;
+  try {
+    res = await fetch(path, { ...options, headers: { 'X-Admin-Token': token, ...options.headers } });
+  } catch (err) {
+    console.error(`[Admin API Network Error] ${path}:`, err);
+    throw new Error(`Koneksi gagal: ${err.message}`);
+  }
   if (res.status === 401) {
     showLogin('Token admin tidak valid.');
     throw new Error('unauthorized');
   }
   if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    throw new Error(body?.error || `Permintaan gagal (HTTP ${res.status})`);
+    const text = await res.text();
+    let body = null;
+    try { body = text ? JSON.parse(text) : null; } catch {}
+    const msg = body?.error || (text && text.length < 200 ? text : null) || `HTTP ${res.status}`;
+    console.error(`[Admin API Error ${res.status}] ${path}:`, msg);
+    throw new Error(msg);
   }
   return res;
 }

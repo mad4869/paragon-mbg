@@ -17,6 +17,7 @@ export const db = openDatabase({
 });
 export const batches = new BatchService(db);
 const cutoffLabel = async () => formatCutoff(await batches.getCutoff());
+
 export const sender = (() => {
   try {
     return createWhatsAppSender(config.whatsapp, { dataDir: config.dataDir });
@@ -30,6 +31,7 @@ export const sender = (() => {
     };
   }
 })();
+
 export const scheduler = new RecapScheduler({
   batches,
   sender,
@@ -44,6 +46,14 @@ app.disable('x-powered-by');
 app.use(express.json({ limit: '10kb' }));
 app.use(express.static(path.join(ROOT_DIR, 'public')));
 
+// Normalisasi URL untuk environment Netlify Functions
+app.use((req, res, next) => {
+  if (req.url.startsWith('/.netlify/functions/api')) {
+    req.url = req.url.replace('/.netlify/functions/api', '') || '/';
+  }
+  next();
+});
+
 const publicOrder = ({ id, batch_date, name, food, quantity, notes, created_at }) => ({
   id,
   batchDate: batch_date,
@@ -54,9 +64,11 @@ const publicOrder = ({ id, batch_date, name, food, quantity, notes, created_at }
   createdAt: created_at,
 });
 
+const apiRouter = express.Router();
+
 // ---------------------------------------------------------------- publik
 
-app.get('/api/status', async (req, res, next) => {
+apiRouter.get('/status', async (req, res, next) => {
   try {
     const status = await batches.currentStatus();
     const label = await cutoffLabel();
@@ -66,7 +78,7 @@ app.get('/api/status', async (req, res, next) => {
   }
 });
 
-app.get('/api/orders', async (req, res, next) => {
+apiRouter.get('/orders', async (req, res, next) => {
   try {
     const openDate = await batches.openBatchDate();
     const orders = await batches.listOrders(openDate);
@@ -76,7 +88,7 @@ app.get('/api/orders', async (req, res, next) => {
   }
 });
 
-app.post('/api/orders', async (req, res, next) => {
+apiRouter.post('/orders', async (req, res, next) => {
   try {
     const order = await batches.placeOrder(req.body);
     res.status(201).json(publicOrder(order));
@@ -107,7 +119,7 @@ function batchDateParam(req, res, next) {
   next();
 }
 
-app.get('/api/admin/batch', requireAdmin, batchDateParam, async (req, res, next) => {
+apiRouter.get('/admin/batch', requireAdmin, batchDateParam, async (req, res, next) => {
   try {
     const batch = await batches.getBatch(req.batchDate);
     const orders = await batches.listOrders(req.batchDate);
@@ -128,7 +140,7 @@ app.get('/api/admin/batch', requireAdmin, batchDateParam, async (req, res, next)
   }
 });
 
-app.get('/api/admin/recap.png', requireAdmin, batchDateParam, async (req, res, next) => {
+apiRouter.get('/admin/recap.png', requireAdmin, batchDateParam, async (req, res, next) => {
   try {
     const recap = await scheduler.buildRecap(req.batchDate);
     const png = await renderRecapPng(recap);
@@ -138,7 +150,7 @@ app.get('/api/admin/recap.png', requireAdmin, batchDateParam, async (req, res, n
   }
 });
 
-app.post('/api/admin/send', requireAdmin, batchDateParam, async (req, res) => {
+apiRouter.post('/admin/send', requireAdmin, batchDateParam, async (req, res) => {
   try {
     const cutoff = await batches.getCutoff();
     const now = batches.now();
@@ -155,7 +167,7 @@ app.post('/api/admin/send', requireAdmin, batchDateParam, async (req, res) => {
   }
 });
 
-app.post('/api/admin/reopen', requireAdmin, batchDateParam, async (req, res, next) => {
+apiRouter.post('/admin/reopen', requireAdmin, batchDateParam, async (req, res, next) => {
   try {
     if (req.batchDate !== batchDateOf(batches.now())) {
       return res.status(409).json({ error: 'Hanya batch hari ini yang bisa di-reset.' });
@@ -183,7 +195,7 @@ async function settingsResponse() {
   };
 }
 
-app.get('/api/admin/settings', requireAdmin, async (req, res, next) => {
+apiRouter.get('/admin/settings', requireAdmin, async (req, res, next) => {
   try {
     res.json(await settingsResponse());
   } catch (err) {
@@ -191,7 +203,7 @@ app.get('/api/admin/settings', requireAdmin, async (req, res, next) => {
   }
 });
 
-app.put('/api/admin/settings', requireAdmin, async (req, res, next) => {
+apiRouter.put('/admin/settings', requireAdmin, async (req, res, next) => {
   try {
     await batches.setCutoff(req.body?.cutoffTime);
     const label = formatCutoff(await batches.getCutoff());
@@ -203,7 +215,7 @@ app.put('/api/admin/settings', requireAdmin, async (req, res, next) => {
   }
 });
 
-app.delete('/api/admin/orders/:id', requireAdmin, async (req, res, next) => {
+apiRouter.delete('/admin/orders/:id', requireAdmin, async (req, res, next) => {
   try {
     if (!(await batches.deleteOrder(Number(req.params.id)))) {
       return res.status(404).json({ error: 'Pesanan tidak ditemukan.' });
@@ -215,7 +227,7 @@ app.delete('/api/admin/orders/:id', requireAdmin, async (req, res, next) => {
 });
 
 // Endpoint untuk webhook / cron runner
-app.post('/api/cron/tick', async (req, res, next) => {
+apiRouter.post('/cron/tick', async (req, res, next) => {
   try {
     await scheduler.tick();
     res.json({ ok: true });
@@ -224,11 +236,15 @@ app.post('/api/cron/tick', async (req, res, next) => {
   }
 });
 
+// Pasang rute di /api dan juga root / agar selalu cocok apapun routing Netlify
+app.use('/api', apiRouter);
+app.use('/', apiRouter);
+
 app.get('/admin', (req, res) => res.sendFile(path.join(ROOT_DIR, 'public', 'admin.html')));
 
 app.use((err, req, res, next) => {
-  console.error(err);
-  res.status(500).json({ error: 'Terjadi kesalahan pada server.' });
+  console.error('[Express App Error]:', err);
+  res.status(500).json({ error: err.message || 'Terjadi kesalahan pada server.' });
 });
 
 // Hanya jalankan listener & scheduler bila dijalankan langsung (bukan di-import oleh serverless lambda)
